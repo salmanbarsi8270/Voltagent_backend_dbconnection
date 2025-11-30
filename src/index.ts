@@ -63,11 +63,12 @@ const mainAgent = new Agent({
       Response: {"success": true, "message": "Hello! I'm your user management assistant. I can help you create, read, update, delete users, or get statistics. What would you like to do?", "type": "conversation"} 
 
       User: "what can you do?" 
-      Response: {"success": true, "message": "I can help you manage users with these commands:\n
-      - Add/create users\n- Show/list all users\n- Search for users\n
-      - Update user information\n
-      - Delete users\n
-      - Get database statistics", "type": "conversation"} 
+      Response: {"success": true, "message": "I can help you manage users with these commands: '\n'
+      - Add/create users '\n'
+      - Show/list all users '\n'
+      - Search for users '\n'
+      - Update user information '\n'
+      - Delete users '\n', "type": "conversation"} 
 
       IMPORTANT:
       - You MUST always call the tool for any database-related request
