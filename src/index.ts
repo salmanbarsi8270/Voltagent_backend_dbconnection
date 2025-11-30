@@ -36,25 +36,45 @@ async function initializeDatabase() {
 }
 
 const mainAgent = new Agent({
-  name:"user-management-agent",
+  name: "user-management-agent",
 
-  instructions:`
-    You NEVER reply text directly.
-    You MUST always call the tool execute_smart_query.
+  instructions: `You are a user management AI assistant. Your job is to:
 
-    Convert natural language → structured { "naturalQuery": "<query>" }
+      1. ALWAYS use the execute_smart_query tool for database operations
+      2. Convert natural language requests into tool calls
+      3. Return the tool's response directly as JSON
 
-    Example mappings you MUST follow:
+      EXAMPLES:
 
-    "show users" → naturalQuery:"select * from users"
-    "get all users" → naturalQuery:"select * from users"
-    "find arif" → naturalQuery:"select * from users where name ilike '%arif%'"
-    "delete user 3" → naturalQuery:"delete from users where id=3 returning *"
+      User: "show all users"
+      → Call execute_smart_query with naturalQuery: "show all users"
+      → Return the tool's JSON response
 
-    Always return final JSON output from tool. No normal message.
-    `,
+      User: "add user John with email john@test.com"
+      → Call execute_smart_query with naturalQuery: "add user John with email john@test.com"
+      → Return the tool's JSON response
 
-  tools:[executeSmartQueryTool],
+      User: "delete user 3"
+      → Call execute_smart_query with naturalQuery: "delete user 3"
+      → Return the tool's JSON response
+
+      Example: 
+      User: "hi" 
+      Response: {"success": true, "message": "Hello! I'm your user management assistant. I can help you create, read, update, delete users, or get statistics. What would you like to do?", "type": "conversation"} 
+
+      User: "what can you do?" 
+      Response: {"success": true, "message": "I can help you manage users with these commands:\n
+      - Add/create users\n- Show/list all users\n- Search for users\n
+      - Update user information\n
+      - Delete users\n
+      - Get database statistics", "type": "conversation"} 
+
+      IMPORTANT:
+      - You MUST always call the tool for any database-related request
+      - Return ONLY the tool's JSON response, no additional text
+      - If the tool returns an error, pass it through as-is`,
+
+  tools: [executeSmartQueryTool],
   model: openrouter.chat("x-ai/grok-4.1-fast:free"),
 });
 
@@ -79,15 +99,27 @@ const startServer = async () => {
           credentials: true,
         }));
 
-        app.post("/api/command", async(c)=>{
-          const { input } = await c.req.json();
+        app.post("/api/command", async (c) => {
+          try {
+            const { input } = await c.req.json();
+            console.log("📥 Received command:", input);
 
-          const response = await mainAgent.generateText(input);
-          const clean = response.text.replace(/```json|```/g,"").trim();
+            const response = await mainAgent.generateText(input);
+            console.log("🤖 Agent response:", response.text);
 
-          return c.json(JSON.parse(clean)); // ALWAYS PROPER JSON
+            // Clean and parse response
+            const clean = response.text.replace(/```json|```/g, "").trim();
+            const parsed = JSON.parse(clean);
+
+            return c.json(parsed);
+          } catch (error: any) {
+            console.error("❌ Command error:", error.message);
+            return c.json({
+              success: false,
+              error: error.message || "Failed to process command"
+            }, 500);
+          }
         });
-
 
         app.post("/api/init", async (c) => {
           try {
@@ -103,36 +135,24 @@ const startServer = async () => {
 
         app.get("/api/stats", async (c) => {
           try {
-            const result = await mainAgent.generateText("Get database statistics");
-            console.log("Stats response:", result.text);
+            const result = await sql`
+              SELECT  COUNT(*) as total_users, COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as recent_users, COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) as today_users FROM users
+            `;
             
-            let parsed;
-            try {
-              const cleanText = result.text.replace(/```json\n?|\n?```/g, '').trim();
-              parsed = JSON.parse(cleanText);
-            } catch {
-              parsed = { success: false, error: "Failed to get statistics" };
-            }
+            const stats = result[0];
             
-            return c.json(parsed);
+            return c.json({success: true,stats: { total_users: parseInt(stats.total_users), recent_users: parseInt(stats.recent_users), today_users: parseInt(stats.today_users)}});
           } catch (error: any) {
-            return c.json({ 
-              success: false, 
-              error: error?.message ?? "Unknown error" 
-            }, 500);
+            return c.json({ success: false, error: error?.message ?? "Unknown error"}, 500);
           }
         });
 
         app.get("/health", async (c) => {
           try {
             await sql`SELECT 1`;
-            return c.json({ 
-              status: "healthy", timestamp: new Date().toISOString(),database: "connected"
-            });
+            return c.json({  status: "healthy", timestamp: new Date().toISOString(), database: "connected"});
           } catch (error: any) {
-            return c.json({ 
-              status: "unhealthy", error: error?.message, timestamp: new Date().toISOString()
-            }, 500);
+            return c.json({  status: "unhealthy", error: error?.message, timestamp: new Date().toISOString()}, 500);
           }
         });
       },
